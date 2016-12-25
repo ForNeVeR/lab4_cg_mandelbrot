@@ -26,6 +26,11 @@ class RenderThread : public QThread {
  protected:
   void run() Q_DECL_OVERRIDE;
 
+  void calculateIntelacedShift(QImage *image, int halfWidth, int halfHeight,
+                               int interlaced_gap, int shift_x, int shift_y,
+                               double center_x, double center_y,
+                               ulong MaxIterations);
+
  private:
   uint rgbFromWaveLength(double wave);
 
