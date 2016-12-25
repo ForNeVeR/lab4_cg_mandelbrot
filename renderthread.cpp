@@ -50,7 +50,8 @@
 #include <QElapsedTimer>
 #include <QtWidgets>
 #include <cmath>
-
+const int SUPERSAMPLE_SCALE(8);
+// helpers
 template <typename T>
 T lerp(T v0, T v1, T t) {
   return (1 - t) * v0 + t * v1;
@@ -60,12 +61,32 @@ template <typename T, typename U>
 T lerp(T v0, T v1, U t) {
   return (1 - t) * v0 + t * v1;
 }
+int limrand(int low, int high) {
+  int x;
+  do {
+    x = qrand();
+  } while (x >= (RAND_MAX - RAND_MAX % high));
+  return low + x % high;
+}
 
 QColor myColorInterpolator(const QColor &start, const QColor &end,
                            qreal progress) {
   return QColor::fromRgbF(lerp(start.redF(), end.redF(), progress),
                           lerp(start.greenF(), end.greenF(), progress),
                           lerp(start.blueF(), end.blueF(), progress));
+}
+
+QColor colorAvgSum(const QColor (*color_array)[SUPERSAMPLE_SCALE]) {
+  int r(0), g(0), b(0);
+  for (QColor color : *color_array) {
+    r += color.red();
+    g += color.green();
+    b += color.blue();
+  }
+  r /= SUPERSAMPLE_SCALE;
+  g /= SUPERSAMPLE_SCALE;
+  b /= SUPERSAMPLE_SCALE;
+  return QColor(r, g, b);
 }
 
 RenderThread::RenderThread(QObject *parent) : QThread(parent) {
@@ -121,6 +142,7 @@ void RenderThread::render(double centerX, double centerY, double scaleFactor,
 }
 
 void RenderThread::run() {
+  qsrand(static_cast<uint>(time(0)));
   forever {
     mutex.lock();
     QSize resultSize = this->resultSize;
@@ -135,13 +157,13 @@ void RenderThread::run() {
     QImage image(resultSize, QImage::Format_RGB32);
     ulong MaxIterations = 1000 + static_cast<ulong>(1 / (scaleFactor * 2000));
     const int Limit = (1 << 16);
-    int interlaced_gap = 1;
+    int interlaced_gap = 3;
     // draw interlaced
     int pass = 0;
 
     image.fill(Qt::black);
     int x = -halfWidth;
-    while (pass < 1000) {
+    while (pass < 100) {
       if (restart) break;
       if (abort) return;
       int shift_x = 0;
@@ -151,51 +173,58 @@ void RenderThread::run() {
       }
 
       while (shift_y < interlaced_gap) {
-        if (restart) break;
-        if (abort) return;
-
         for (int y = -halfHeight; y < halfHeight; y += interlaced_gap) {
-          if (restart) break;
-          if (abort) return;
           if (!((y + shift_y) < halfHeight)) break;
           int y_d = (y + shift_y);
-          long double y0 = static_cast<long double>(centerY) +
-                           (y_d * static_cast<long double>(scaleFactor));
 
           for (x = -halfWidth; x < halfWidth; x += interlaced_gap) {
-            if (restart) break;
-            if (abort) return;
             if (!((x + shift_x) < halfWidth)) break;
             int x_d = (x + shift_x);
-            long double x0 = static_cast<long double>(centerX) +
-                             (x_d * static_cast<long double>(scaleFactor));
-            long double cr = x0;
-            long double ci = y0;
-            ulong numIterations = 0;
-            do {
-              ++numIterations;
-              long double buffer = cr;
-              cr = (cr * cr) - (ci * ci) + x0;
-              ci = (2 * buffer * ci) + y0;
 
-            } while ((cr * cr) + (ci * ci) <= Limit &&
-                     numIterations < MaxIterations);
+            // this uses random supersampling
+            // calculate a given number of random subpixels inside a pixel and
+            // average a sum of colors
+            QColor sample_colors[SUPERSAMPLE_SCALE];
+            for (int i(0); i < SUPERSAMPLE_SCALE; ++i) {
+              if (restart) break;
+              if (abort) return;
 
-            if (numIterations < MaxIterations) {
-              qreal log_zn(static_cast<qreal>(logl(cr * cr + ci * ci) / 2)),
-                  nu(numIterations + 1 - (log(log_zn / log(2)) / log(2))),
-                  smoothcolor(nu - floor(nu));
+              double x0 =
+                  static_cast<double>(centerX) +
+                  lerp(x_d - 0.5, x_d + 0.5, 1 / static_cast<double>(qrand())) *
+                      scaleFactor;
+              double y0 =
+                  static_cast<double>(centerY) +
+                  lerp(y_d - 0.5, y_d + 0.5, 1 / static_cast<double>(qrand())) *
+                      scaleFactor;
+              double cr = x0;
+              double ci = y0;
+              ulong numIterations = 0;
+              do {
+                ++numIterations;
+                double buffer = cr;
+                cr = (cr * cr) - (ci * ci) + x0;
+                ci = (2 * buffer * ci) + y0;
+              } while ((cr * cr) + (ci * ci) <= Limit &&
+                       numIterations < MaxIterations);
+              if (numIterations < MaxIterations) {
+                qreal log_zn(log(cr * cr + ci * ci) / 2),
+                    nu(numIterations + 1 - (log(log_zn / log(2)) / log(2))),
+                    smoothcolor(nu - floor(nu));
 
-              image.setPixelColor(
-                  x_d + halfWidth, y_d + halfHeight,
-                  myColorInterpolator(
-                      colormap[(numIterations + 1) % colormapSize],
-                      colormap[(numIterations) % colormapSize],
-                      1 - smoothcolor));
+                sample_colors[i] = myColorInterpolator(
+                    colormap[(numIterations + 1) % colormapSize],
+                    colormap[(numIterations) % colormapSize], 1 - smoothcolor);
+              } else {
+                sample_colors[i] = qRgb(0, 0, 0);
+              }
             }
+
+            // sum of colors
+            image.setPixelColor(x_d + halfWidth, y_d + halfHeight,
+                                colorAvgSum(&sample_colors));
           }
         }
-
         if (!restart)
           emit renderedImage(image, scaleFactor, interlaced_gap,
                              timer.elapsed());
@@ -206,49 +235,13 @@ void RenderThread::run() {
           shift_x = 0;
         }
       }
-
       pass++;
       MaxIterations += 1000;
     }
+
     mutex.lock();
     if (!restart) condition.wait(&mutex);
     restart = false;
     mutex.unlock();
   }
-}
-
-uint RenderThread::rgbFromWaveLength(double wave) {
-  double r = 0.0;
-  double g = 0.0;
-  double b = 0.0;
-
-  if (wave >= 380.0 && wave <= 440.0) {
-    r = -1.0 * (wave - 440.0) / (440.0 - 380.0);
-    b = 1.0;
-  } else if (wave >= 440.0 && wave <= 490.0) {
-    g = (wave - 440.0) / (490.0 - 440.0);
-    b = 1.0;
-  } else if (wave >= 490.0 && wave <= 510.0) {
-    g = 1.0;
-    b = -1.0 * (wave - 510.0) / (510.0 - 490.0);
-  } else if (wave >= 510.0 && wave <= 580.0) {
-    r = (wave - 510.0) / (580.0 - 510.0);
-    g = 1.0;
-  } else if (wave >= 580.0 && wave <= 645.0) {
-    r = 1.0;
-    g = -1.0 * (wave - 645.0) / (645.0 - 580.0);
-  } else if (wave >= 645.0 && wave <= 780.0) {
-    r = 1.0;
-  }
-
-  double s = 1.0;
-  if (wave > 700.0)
-    s = 0.3 + 0.7 * (780.0 - wave) / (780.0 - 700.0);
-  else if (wave < 420.0)
-    s = 0.3 + 0.7 * (wave - 380.0) / (420.0 - 380.0);
-
-  r = std::pow(r * s, 0.8);
-  g = std::pow(g * s, 0.8);
-  b = std::pow(b * s, 0.8);
-  return qRgb(int(r * 255), int(g * 255), int(b * 255));
 }
