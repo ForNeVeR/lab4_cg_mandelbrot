@@ -26,10 +26,10 @@ class RenderThread : public QThread {
  protected:
   void run() Q_DECL_OVERRIDE;
 
-  void calculateIntelacedShift(QImage *image, int halfWidth, int halfHeight,
-                               int interlaced_gap, int shift_x, int shift_y,
-                               double center_x, double center_y,
-                               ulong MaxIterations);
+  void calculateInterlacedShift(QImage *image, int halfWidth, int halfHeight,
+                                int interlaced_gap, int shift_x, int shift_y,
+                                double center_x, double center_y,
+                                int SUPERSAMPLE_SCALE, ulong MaxIterations);
 
  private:
   uint rgbFromWaveLength(double wave);
@@ -38,7 +38,7 @@ class RenderThread : public QThread {
   QWaitCondition condition;
   qreal centerX, centerY, scaleFactor;
   QSize resultSize;
-  static const int colormapSize = 512;
+  static const int colormapSize = 40;
   QColor colormap[colormapSize];
   bool restart, abort;
 };
