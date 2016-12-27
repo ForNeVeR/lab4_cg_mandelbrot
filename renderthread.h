@@ -17,11 +17,13 @@ class RenderThread : public QThread {
   ~RenderThread();
 
   void render(double centerX, double centerY, double scaleFactor,
-              QSize resultSize);
-
+              int supersample = 1, QSize resultSize = QSize(),
+              ulong maxIterations = 0);
  signals:
-  void renderedImage(const QImage &image, double scaleFactor, double imageScale,
-                     qint64 elapsed);
+  void renderedImage(const QImage &image, double scaleFactor, qint64 elapsed);
+ public slots:
+  void restart();
+  void abort();
 
  protected:
   void run() Q_DECL_OVERRIDE;
@@ -37,10 +39,12 @@ class RenderThread : public QThread {
   QMutex mutex;
   QWaitCondition condition;
   qreal centerX, centerY, scaleFactor;
+  ulong maxIterations;
   QSize resultSize;
-  static const int colormapSize = 40;
+  int supersampleScale = 1;
+  static const int colormapSize = 12;
   QColor colormap[colormapSize];
-  bool restart, abort;
+  bool _restart, _abort;
 };
 
 #endif  // RENDERTHREAD_H

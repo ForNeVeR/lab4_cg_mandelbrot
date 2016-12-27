@@ -11,6 +11,14 @@ class MandelbrotWidget : public QWidget {
  public:
   MandelbrotWidget(QWidget *parent = 0);
 
+  double getCenterX() const;
+  void setCenterX(double value);
+
+  double getCenterY() const;
+  void setCenterY(double value);
+
+  double getPixmapScale() const;
+
  protected:
   void paintEvent(QPaintEvent *event) Q_DECL_OVERRIDE;
   void resizeEvent(QResizeEvent *event) Q_DECL_OVERRIDE;
@@ -23,8 +31,7 @@ class MandelbrotWidget : public QWidget {
   void mouseReleaseEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
 
  private slots:
-  void updatePixmap(const QImage &image, double scaleFactor,
-                    double curImageScale, qint64 elapsed);
+  void updatePixmap(const QImage &image, double scaleFactor, qint64 elapsed);
   void zoom(double zoomFactor);
 
  private:
@@ -33,7 +40,9 @@ class MandelbrotWidget : public QWidget {
   RenderThread thread;
   QPixmap pixmap;
   QPoint pixmapOffset, lastDragPos;
-  double centerX, centerY, pixmapScale, curScale, imageScale;
+  QSize curSize;
+  int supersampling;
+  double centerX, centerY, pixmapScale, curScale;
   qint64 elapsedTimeMsec;
 };
 

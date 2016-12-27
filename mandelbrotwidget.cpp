@@ -18,15 +18,20 @@ MandelbrotWidget::MandelbrotWidget(QWidget *parent) : QWidget(parent) {
   centerY = DefaultCenterY;
   pixmapScale = DefaultScale;
   curScale = DefaultScale;
-
-  connect(&thread, SIGNAL(renderedImage(QImage, double, double, qint64)), this,
-          SLOT(updatePixmap(QImage, double, double, qint64)));
-
+  supersampling = 1;
+  connect(&thread, SIGNAL(renderedImage(QImage, double, qint64)), this,
+          SLOT(updatePixmap(QImage, double, qint64)));
+  //  setToolTip(
+  //      tr("Use mouse wheel or the '+' and '-' keys to zoom."
+  //         "Press and hold left mouse button to scroll. "));
   setWindowTitle(tr("Mandelbrot set"));
+  setFocusPolicy(Qt::StrongFocus);
+  setFocus();
 #ifndef QT_NO_CURSOR
   setCursor(Qt::CrossCursor);
 #endif
   resize(1000, 600);
+  curSize = size();
 }
 
 void MandelbrotWidget::paintEvent(QPaintEvent * /* event */) {
@@ -58,24 +63,24 @@ void MandelbrotWidget::paintEvent(QPaintEvent * /* event */) {
     painter.restore();
   }
 
-  QString text = tr("Use mouse wheel or the '+' and '-' keys to zoom. "
-                    "Press and hold left mouse button to scroll. "
-                    "Elapsed: %1 msec")
-                     .arg(elapsedTimeMsec);
-  QFontMetrics metrics = painter.fontMetrics();
-  int textWidth = metrics.width(text);
+  //  QString text = tr("Use mouse wheel or the '+' and '-' keys to zoom. "
+  //                    "Press and hold left mouse button to scroll. "
+  //                    "Elapsed: %1 msec")
+  //                     .arg(elapsedTimeMsec);
+  //  QFontMetrics metrics = painter.fontMetrics();
+  //  int textWidth = metrics.width(text);
 
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(0, 0, 0, 127));
-  painter.drawRect((width() - textWidth) / 2 - 5, 0, textWidth + 10,
-                   metrics.lineSpacing() + 5);
-  painter.setPen(Qt::white);
-  painter.drawText((width() - textWidth) / 2,
-                   metrics.leading() + metrics.ascent(), text);
+  //  painter.setPen(Qt::NoPen);
+  //  painter.setBrush(QColor(0, 0, 0, 127));
+  //  painter.drawRect((width() - textWidth) / 2 - 5, 0, textWidth + 10,
+  //                   metrics.lineSpacing() + 5);
+  //  painter.setPen(Qt::white);
+  //  painter.drawText((width() - textWidth) / 2,
+  //                   metrics.leading() + metrics.ascent(), text);
 }
 
-void MandelbrotWidget::resizeEvent(QResizeEvent * /* event */) {
-  thread.render(centerX, centerY, curScale, size());
+void MandelbrotWidget::resizeEvent(QResizeEvent * /*event*/) {
+  thread.render(centerX, centerY, curScale, supersampling, size());
 }
 
 void MandelbrotWidget::keyPressEvent(QKeyEvent *event) {
@@ -135,7 +140,7 @@ void MandelbrotWidget::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 void MandelbrotWidget::updatePixmap(const QImage &image, double scaleFactor,
-                                    double curImageScale, qint64 elapsed) {
+                                    qint64 elapsed) {
   if (!lastDragPos.isNull()) return;
 
   pixmap = QPixmap::fromImage(image);
@@ -143,19 +148,28 @@ void MandelbrotWidget::updatePixmap(const QImage &image, double scaleFactor,
   lastDragPos = QPoint();
   pixmapScale = scaleFactor;
   elapsedTimeMsec = elapsed;
-  imageScale = curImageScale;
   update();
 }
 
 void MandelbrotWidget::zoom(double zoomFactor) {
   curScale *= zoomFactor;
   update();
-  thread.render(centerX, centerY, curScale, size());
+  thread.render(centerX, centerY, curScale, supersampling, size());
 }
 
 void MandelbrotWidget::scroll(int deltaX, int deltaY) {
   centerX += deltaX * curScale;
   centerY += deltaY * curScale;
   update();
-  thread.render(centerX, centerY, curScale, size());
+  thread.render(centerX, centerY, curScale, supersampling, size());
 }
+
+double MandelbrotWidget::getPixmapScale() const { return pixmapScale; }
+
+double MandelbrotWidget::getCenterY() const { return centerY; }
+
+void MandelbrotWidget::setCenterY(double value) { centerY = value; }
+
+double MandelbrotWidget::getCenterX() const { return centerX; }
+
+void MandelbrotWidget::setCenterX(double value) { centerX = value; }

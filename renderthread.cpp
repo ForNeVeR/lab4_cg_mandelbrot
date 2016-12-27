@@ -52,7 +52,6 @@
 #include <QtConcurrentMap>
 #include <QtWidgets>
 #include <cmath>
-const int MAX_SUPERSAMPLE_SCALE(1280);
 
 // helpers
 template <typename T>
@@ -93,15 +92,15 @@ QColor colorAvgSum(const QVector<QColor> &color_array, int supersample_scale) {
 }
 
 RenderThread::RenderThread(QObject *parent) : QThread(parent) {
-  restart = false;
-  abort = false;
+  _restart = false;
+  _abort = false;
   // Ultra Fractal palette
   QColor mapping[16];
   // mapping[0].setRgb(66, 30, 15);
   mapping[0].setRgb(25, 7, 26);
   mapping[1].setRgb(9, 1, 47);
-  mapping[2].setRgb(4, 4, 73);
-  // mapping[3].setRgb(0, 7, 100);
+  // mapping[2].setRgb(4, 4, 73);
+  mapping[2].setRgb(0, 7, 100);
   mapping[3].setRgb(12, 44, 138);
   mapping[4].setRgb(24, 82, 177);
   mapping[5].setRgb(57, 125, 209);
@@ -121,30 +120,39 @@ RenderThread::RenderThread(QObject *parent) : QThread(parent) {
   }
 }
 
-RenderThread::~RenderThread() {
-  mutex.lock();
-  abort = true;
-  condition.wakeOne();
-  mutex.unlock();
-
-  wait();
-}
+RenderThread::~RenderThread() { abort(); }
 
 void RenderThread::render(double centerX, double centerY, double scaleFactor,
-                          QSize resultSize) {
+                          int supersample, QSize resultSize,
+                          ulong maxIterations) {
   QMutexLocker locker(&mutex);
 
   this->centerX = centerX;
   this->centerY = centerY;
   this->scaleFactor = scaleFactor;
   this->resultSize = resultSize;
-
+  this->supersampleScale = supersample;
+  this->maxIterations = maxIterations;
   if (!isRunning()) {
     start(LowPriority);
   } else {
-    restart = true;
+    _restart = true;
     condition.wakeOne();
   }
+}
+
+void RenderThread::restart() {
+  mutex.lock();
+  _restart = true;
+  mutex.unlock();
+}
+
+void RenderThread::abort() {
+  mutex.lock();
+  _abort = true;
+  condition.wakeOne();
+  mutex.unlock();
+  wait();
 }
 
 void RenderThread::run() {
@@ -155,53 +163,52 @@ void RenderThread::run() {
     double scaleFactor = this->scaleFactor;
     double center_x = this->centerX;
     double center_y = this->centerY;
-
+    int supersampleScale = this->supersampleScale;
+    ulong maxIterations = this->maxIterations;
     mutex.unlock();
     int halfWidth = resultSize.width() / 2;
     int halfHeight = resultSize.height() / 2;
     QElapsedTimer timer;
     timer.start();
-    int supersample_scale = 1;
-    ulong scaleIterationsFactor =
-        (static_cast<ulong>(1 / (scaleFactor * 5000)));
-    ulong MaxIterations = 1000 + scaleIterationsFactor * scaleIterationsFactor;
-    while (supersample_scale < MAX_SUPERSAMPLE_SCALE) {
-      if (restart) break;
-      if (abort) return;
-      timer.restart();
-      int interlaced_gap = 10;
-      // draw interlaced
-      QVector<QPoint> shifts;
-      if (restart) break;
-      if (abort) return;
-      int shift_x = 0;
-      int shift_y = 0;
-      while (shift_y < interlaced_gap) {
-        shifts.append(QPoint(shift_x, shift_y));
-        if (shift_x < interlaced_gap - 1) {
-          ++shift_x;
-        } else {
-          ++shift_y;
-          shift_x = 0;
-        }
-      }
+    if (!maxIterations) {
+      ulong scaleIterationsFactor =
+          static_cast<ulong>(1 / (scaleFactor * 5000));
 
-      QImage image(resultSize, QImage::Format_RGB32);
-      image.fill(Qt::black);
-      auto calc = [&](QPoint shift) {
-        return calculateInterlacedShift(
-            &image, halfWidth, halfHeight, interlaced_gap, shift.x(), shift.y(),
-            center_x, center_y, supersample_scale, MaxIterations);
-      };
-      QtConcurrent::blockingMap(shifts, calc);
-
-      if (!restart)
-        emit renderedImage(image, scaleFactor, interlaced_gap, timer.elapsed());
-      supersample_scale += 4;
+      maxIterations = 1000 + scaleIterationsFactor * scaleIterationsFactor;
     }
+
+    if (_restart) break;
+    if (_abort) return;
+    timer.restart();
+    int interlaced_gap = 10;
+    // draw interlaced
+    QVector<QPoint> shifts;
+    if (_restart) break;
+    if (_abort) return;
+    int shift_x = 0;
+    int shift_y = 0;
+    while (shift_y < interlaced_gap) {
+      shifts.append(QPoint(shift_x, shift_y));
+      if (shift_x < interlaced_gap - 1) {
+        ++shift_x;
+      } else {
+        ++shift_y;
+        shift_x = 0;
+      }
+    }
+
+    QImage *image = new QImage(resultSize, QImage::Format_RGB32);
+    auto calc = [&](QPoint shift) {
+      return calculateInterlacedShift(
+          image, halfWidth, halfHeight, interlaced_gap, shift.x(), shift.y(),
+          center_x, center_y, supersampleScale, maxIterations);
+    };
+    QtConcurrent::blockingMap(shifts, calc);
+
+    if (!_restart) emit renderedImage(*image, scaleFactor, timer.elapsed());
     mutex.lock();
-    if (!restart) condition.wait(&mutex);
-    restart = false;
+    if (!_restart) condition.wait(&mutex);
+    _restart = false;
     mutex.unlock();
   }
 }
@@ -216,21 +223,21 @@ void RenderThread::calculateInterlacedShift(QImage *image, int halfWidth,
   for (int y = -halfHeight; y < halfHeight; y += interlaced_gap) {
     if (!((y + shift_y) < halfHeight)) break;
     int y_d = (y + shift_y);
-    if (restart) break;
-    if (abort) return;
+    if (_restart) break;
+    if (_abort) return;
     for (int x = -halfWidth; x < halfWidth; x += interlaced_gap) {
       if (!((x + shift_x) < halfWidth)) break;
       int x_d = (x + shift_x);
-      if (restart) break;
-      if (abort) return;
+      if (_restart) break;
+      if (_abort) return;
       // this uses random supersampling
       // calculate a given number of random subpixels inside a pixel and
       // average a sum of colors
       QVector<QColor> sample_colors;
       sample_colors.reserve(supersample_scale);
       for (int i(0); i < supersample_scale; ++i) {
-        if (restart) break;
-        if (abort) return;
+        if (_restart) break;
+        if (_abort) return;
 
         double x0 =
             center_x +
@@ -263,8 +270,8 @@ void RenderThread::calculateInterlacedShift(QImage *image, int halfWidth,
         }
 
         if (numIterations < MaxIterations) {
-          /// a couple of extra iterations helps
-          /// decrease the size of the error term.
+          // a couple of extra iterations helps
+          // decrease the size of the error term.
           for (int i = 0; i < 4; i++) {
             double buffer_cr = (cr * cr) - (ci * ci) + x0;
             double buffer_ci = (2 * cr * ci) + y0;
