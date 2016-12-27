@@ -4,6 +4,6 @@
 ## Interface
 ![Interface1](examples/t3.png)
 ## Rendering examples
-![Example1](examples/t1.png)
+![Example1](examples/t.png)
 ![Example2](examples/t2.png)
 ![Example3](examples/ex10_10000.png)
